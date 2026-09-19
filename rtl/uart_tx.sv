@@ -57,12 +57,12 @@ module uart_tx(
     
     always_comb begin
     	case(state)
-    		idle: next_state = tx_start ? send_start : idle;
-    		send_start: next_state = done_sending_start ? load_byte: send_start;
+    		idle: next_state = state_type'(tx_start ? send_start : idle);
+    		send_start: next_state = state_type'(done_sending_start ? load_byte : send_start);
     		load_byte: next_state = sending;
-    		sending: next_state = done_sending ? send_done : sending;
-    		send_done: next_state = done_sending_end ? done : send_done;
-    		done: next_state = tx_start ? send_start : done;
+    		sending: next_state = state_type'(done_sending ? send_done : sending);
+    		send_done: next_state = state_type'(done_sending_end ? done : send_done);
+    		done: next_state = state_type'(tx_start ? send_start : done);
     	endcase
     end
     

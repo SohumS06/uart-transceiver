@@ -67,11 +67,11 @@ module uart_rx(
     
     always_comb begin
         case(state)
-            idle: next_state = start_detected ? adjust : idle;
-            adjust: next_state = done_adjusting ? loading : adjust;
-            loading: next_state = done_loading ? stop_waiting : loading;
-            stop_waiting: next_state = read_stop ? stop_detection : stop_waiting;
-            stop_detection: next_state = stop_good ? done : done_broken;
+            idle: next_state = state_type'(start_detected ? adjust : idle);
+            adjust: next_state = state_type'(done_adjusting ? loading : adjust);
+            loading: next_state = state_type'(done_loading ? stop_waiting : loading);
+            stop_waiting: next_state = state_type'(read_stop ? stop_detection : stop_waiting);
+            stop_detection: next_state = state_type'(stop_good ? done : done_broken);
             done_broken: next_state = idle;
             done: next_state = idle;
         endcase

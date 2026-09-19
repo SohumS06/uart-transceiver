@@ -7,4 +7,6 @@
 *.gen/
 sim_build/
 __pycache__/
-*.vcd 
+*.vcd
+.pytest_cache/
+results.xml
