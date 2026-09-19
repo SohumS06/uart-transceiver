@@ -1,10 +1,10 @@
 # UART Transceiver
 
-A UART transmitter and receiver written in SystemVerilog, built as my first real FPGA project. It's targeting a Digilent Nexys4 DDR board. I mostly wanted to actually understand a UART at the RTL level instead of just instantiating one from an IP catalog, so everything here (rx, tx, and the framing logic) is hand-written.
+A UART transmitter and receiver written in SystemVerilog, built as my first real FPGA project. It's targeting a Digilent Nexys4 DDR board. I mostly wanted to actually understand a UART at the RTL level instead of just instantiating one from an IP catalog, so everything here (rx, tx, and the framing logic) is hand-written. AI assistance was used for the verification tooling, not the RTL or its logic.
 
 `uart_top` just takes whatever byte comes in on `rx` and sends it back out on `tx`.
 
-I've tested this on the actual board over a USB-serial connection and it works.
+I've flashed this onto the board and confirmed it over a USB-serial connection, so it's proven out on real hardware, not just in simulation.
 
 ## File breakdown
 
