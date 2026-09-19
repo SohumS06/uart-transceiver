@@ -1,0 +1,10 @@
+*.jou
+*.log
+.Xil/
+*.cache/
+*.runs/
+*.sim/
+*.gen/
+sim_build/
+__pycache__/
+*.vcd 
