@@ -2,25 +2,25 @@
 
 A UART transmitter and receiver written in SystemVerilog, built as my first real FPGA project. It's targeting a Digilent Nexys4 DDR board. I mostly wanted to actually understand a UART at the RTL level instead of just instantiating one from an IP catalog, so everything here (rx, tx, and the framing logic) is hand-written.
 
-`uart_top` just wires the receiver straight into the transmitter — whatever byte comes in on `rx` gets echoed back out on `tx`. It's a dead-simple loopback, but it's a good way to sanity-check the whole chain on real hardware: send a character over a serial terminal and see it come back.
+`uart_top` just takes whatever byte comes in on `rx` and sends it back out on `tx`.
 
 I've tested this on the actual board over a USB-serial connection and it works.
 
-## How it's put together
+## File breakdown
 
-- **`rtl/uart_rx.sv`** — the receiver. It synchronizes the incoming `rx` line with a couple of flip-flops, waits for the start bit, samples each of the 8 data bits roughly in the middle of its bit period, and then checks the stop bit. If the stop bit isn't where it should be, it flags `frame_error` instead of `rx_done`.
-- **`rtl/uart_tx.sv`** — the transmitter. Takes a byte, shifts it out LSB-first between a start bit and a stop bit, and holds `tx_busy` high the whole time it's sending.
-- **`rtl/uart_top.sv`** — glues the two together for the echo demo (`rx_done` from the receiver drives `tx_start` on the transmitter, and `rx_data` feeds straight into `tx_byte`).
+- **`rtl/uart_rx.sv`** — synchronizes the incoming `rx` line, waits for the start bit, samples each of the 8 data bits near the middle of its bit period, then checks the stop bit. Flags `frame_error` if the stop bit isn't right.
+- **`rtl/uart_tx.sv`** — takes a byte and shifts it out LSB-first between a start bit and a stop bit. Holds `tx_busy` high the whole time it's sending.
+- **`rtl/uart_top.sv`** — connects `uart_rx`'s output into `uart_tx`'s input for the echo.
 
 Both `uart_rx` and `uart_tx` take `CLK_FREQ` and `BAUD_RATE` as parameters, and figure out how many clock cycles make up one bit period from those. `uart_top` sets both to 115200 baud on a 100 MHz clock, which is what the Nexys4 DDR's onboard clock and USB-UART bridge expect.
 
 Pin constraints for the board are in [`constraints/Nexys4_DDR_chu.xdc`](constraints/Nexys4_DDR_chu.xdc) — it's the general Nexys4 DDR constraints file with just the clock and UART pins uncommented/wired up for this project.
 
-## Testing it in simulation
+## Simulation
 
-I didn't have a way to easily throw waveforms up in Vivado's simulator for this write-up, so I set up [cocotb](https://www.cocotb.org/) with Icarus Verilog instead — it's free, it's scriptable, and it means anyone cloning this repo can run the tests without owning a Xilinx license.
+I could have just used Vivado's simulator, but I wanted to actually learn verification with [cocotb](https://www.cocotb.org/) and Icarus Verilog, since writing testbenches in Python makes for cleaner, more readable simulation than plain SystemVerilog testbenches.
 
-The testbenches (`sim/test_uart_tx.py`, `sim/test_uart_rx.py`, `sim/test_uart_top.py`) don't poke at internal signals — they bit-bang actual UART frames onto `rx` and read them back off of `tx`, the same way a real device on the other end of the wire would. That logic is shared between all three test files in `sim/uart_model.py`, so I'm not duplicating the same bit-timing code three times.
+The testbenches bit-bang actual UART frames onto `rx` and read them back off of `tx`, with the shared bit-timing logic living in `sim/uart_model.py`.
 
 Coverage-wise: reset behavior, single-byte transfers across a handful of byte patterns, back-to-back bytes without gaps, `tx_busy` staying asserted for the full frame, and a deliberately corrupted stop bit to make sure `frame_error` actually trips.
 
@@ -34,7 +34,7 @@ pytest -v
 
 ### Waveforms
 
-Since I'm not using a vendor simulator GUI, I wrote a small script (`sim/render_waveforms.py`) that runs a clean single-byte scenario for each module, pulls the FST dump out of Icarus, converts it to VCD with gtkwave's `fst2vcd`, and plots the signals with matplotlib. Not as slick as GTKWave itself, but good enough to drop into a README and it's fully scriptable:
+`sim/render_waveforms.py` generates the waveform images below from simulation:
 
 ```bash
 cd sim
