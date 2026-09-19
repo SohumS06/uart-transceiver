@@ -1,89 +1,75 @@
 # UART Transceiver
 
-A full-duplex UART transceiver (RX + TX) written from scratch in SystemVerilog, targeting the Digilent Nexys4 DDR (Artix-7). This is a personal FPGA learning project — the design, verification, and this writeup are all part of getting comfortable with the RTL-to-bitstream flow.
+A UART transmitter and receiver written in SystemVerilog, built as my first real FPGA project. It's targeting a Digilent Nexys4 DDR board. I mostly wanted to actually understand a UART at the RTL level instead of just instantiating one from an IP catalog, so everything here (rx, tx, and the framing logic) is hand-written.
 
-`uart_top` wires the receiver straight into the transmitter, so any byte received on `rx` is echoed back out on `tx` — a simple, visually checkable "loopback" demo for the board.
+`uart_top` just wires the receiver straight into the transmitter — whatever byte comes in on `rx` gets echoed back out on `tx`. It's a dead-simple loopback, but it's a good way to sanity-check the whole chain on real hardware: send a character over a serial terminal and see it come back.
 
-## Design
+I've tested this on the actual board over a USB-serial connection and it works.
 
-```
-        ┌────────────┐        ┌────────────┐
- rx ───▶│  uart_rx   │───────▶│  uart_tx   │───▶ tx
-        └────────────┘ rx_data└────────────┘
-             │  rx_done            │
-             └──────────────────────┘
-                (rx_done drives tx_start)
-```
+## How it's put together
 
-| Module | File | Description |
-|---|---|---|
-| `uart_rx` | [`rtl/uart_rx.sv`](rtl/uart_rx.sv) | Serial-to-parallel receiver. Double-flop synchronizes `rx`, detects the start bit, samples 8 data bits at the bit-center, and checks the stop bit. Raises `frame_error` on a bad stop bit. |
-| `uart_tx` | [`rtl/uart_tx.sv`](rtl/uart_tx.sv) | Parallel-to-serial transmitter. Shifts `tx_byte` out LSB-first between a start and stop bit, LSB-first, and reports `tx_busy` while a frame is in flight. |
-| `uart_top` | [`rtl/uart_top.sv`](rtl/uart_top.sv) | Top-level echo: connects `uart_rx`'s output directly to `uart_tx`'s input. |
+- **`rtl/uart_rx.sv`** — the receiver. It synchronizes the incoming `rx` line with a couple of flip-flops, waits for the start bit, samples each of the 8 data bits roughly in the middle of its bit period, and then checks the stop bit. If the stop bit isn't where it should be, it flags `frame_error` instead of `rx_done`.
+- **`rtl/uart_tx.sv`** — the transmitter. Takes a byte, shifts it out LSB-first between a start bit and a stop bit, and holds `tx_busy` high the whole time it's sending.
+- **`rtl/uart_top.sv`** — glues the two together for the echo demo (`rx_done` from the receiver drives `tx_start` on the transmitter, and `rx_data` feeds straight into `tx_byte`).
 
-Both blocks are parameterized on `CLK_FREQ` and `BAUD_RATE`; the bit period is derived as `CLK_FREQ / BAUD_RATE` clock cycles. `uart_top` instantiates both at 115200 baud on a 100 MHz clock (matching the Nexys4 DDR's system clock).
+Both `uart_rx` and `uart_tx` take `CLK_FREQ` and `BAUD_RATE` as parameters, and figure out how many clock cycles make up one bit period from those. `uart_top` sets both to 115200 baud on a 100 MHz clock, which is what the Nexys4 DDR's onboard clock and USB-UART bridge expect.
 
-The pin mapping for the board (clock, buttons/switches/LEDs, and the onboard USB-UART bridge) lives in [`constraints/Nexys4_DDR_chu.xdc`](constraints/Nexys4_DDR_chu.xdc).
+Pin constraints for the board are in [`constraints/Nexys4_DDR_chu.xdc`](constraints/Nexys4_DDR_chu.xdc) — it's the general Nexys4 DDR constraints file with just the clock and UART pins uncommented/wired up for this project.
 
-## Verification
+## Testing it in simulation
 
-The RTL is verified with [cocotb](https://www.cocotb.org/) driving [Icarus Verilog](http://iverilog.icarus.com/) — no vendor simulator required. Each testbench bit-bangs real UART frames (start bit, 8 data bits LSB-first, stop bit) at the DUT's own bit rate, so the tests exercise the modules the same way real hardware on the line would.
+I didn't have a way to easily throw waveforms up in Vivado's simulator for this write-up, so I set up [cocotb](https://www.cocotb.org/) with Icarus Verilog instead — it's free, it's scriptable, and it means anyone cloning this repo can run the tests without owning a Xilinx license.
 
-| Testbench | Covers |
-|---|---|
-| [`sim/test_uart_tx.py`](sim/test_uart_tx.py) | Reset state, `tx_busy` framing, single-byte transmission across representative byte patterns, back-to-back transmissions. |
-| [`sim/test_uart_rx.py`](sim/test_uart_rx.py) | Reset state, correct decode of well-formed frames, `frame_error` on an invalid stop bit. |
-| [`sim/test_uart_top.py`](sim/test_uart_top.py) | End-to-end echo: bytes sent into `rx` come back out on `tx` unchanged. |
+The testbenches (`sim/test_uart_tx.py`, `sim/test_uart_rx.py`, `sim/test_uart_top.py`) don't poke at internal signals — they bit-bang actual UART frames onto `rx` and read them back off of `tx`, the same way a real device on the other end of the wire would. That logic is shared between all three test files in `sim/uart_model.py`, so I'm not duplicating the same bit-timing code three times.
 
-Shared UART bit-banging (send/receive helpers) lives in [`sim/uart_model.py`](sim/uart_model.py) so all three testbenches drive/monitor the wire the same way.
+Coverage-wise: reset behavior, single-byte transfers across a handful of byte patterns, back-to-back bytes without gaps, `tx_busy` staying asserted for the full frame, and a deliberately corrupted stop bit to make sure `frame_error` actually trips.
 
-### Running the tests
+To run everything:
 
 ```bash
 cd sim
-pip install -r requirements.txt   # cocotb, pytest, plus waveform-rendering deps
+pip install -r requirements.txt
 pytest -v
 ```
 
-Each `test_*.py` file also runs standalone (`python3 test_uart_tx.py`), and builds/simulates with Icarus Verilog under the hood via `cocotb_tools.runner`.
-
 ### Waveforms
 
-Waveform images below are generated straight from simulation (no vendor GUI) — `sim/render_waveforms.py` runs a dedicated single-scenario cocotb test per module, converts the resulting FST dump to VCD with gtkwave's `fst2vcd`, and plots the signals with matplotlib:
+Since I'm not using a vendor simulator GUI, I wrote a small script (`sim/render_waveforms.py`) that runs a clean single-byte scenario for each module, pulls the FST dump out of Icarus, converts it to VCD with gtkwave's `fst2vcd`, and plots the signals with matplotlib. Not as slick as GTKWave itself, but good enough to drop into a README and it's fully scriptable:
 
 ```bash
 cd sim
 python3 render_waveforms.py
 ```
 
-**`uart_tx`** — transmitting `0xA5`: a start bit, then the 8 data bits shifted out LSB-first (`1010 0101` → `1,0,1,0,0,1,0,1`), then the stop bit. `tx_busy` stays high for the whole frame.
+**Transmitting 0xA5** — start bit, then the 8 data bits LSB-first (`1010 0101` comes out as `1,0,1,0,0,1,0,1`), then the stop bit. `tx_busy` stays high the whole time.
 
 ![uart_tx waveform](docs/waveforms/uart_tx_frame.png)
 
-**`uart_rx`** — decoding that same well-formed frame. `rx_done` pulses for one cycle once the stop bit is validated, with `rx_data` holding the decoded byte.
+**Receiving that same byte** — `rx_done` pulses for one clock cycle once the stop bit checks out, with `rx_data` holding `0xA5`.
 
 ![uart_rx waveform](docs/waveforms/uart_rx_frame.png)
 
-**`uart_rx`** — a frame with a corrupted stop bit (held low instead of high). `frame_error` pulses instead of `rx_done`.
+**A bad frame** — same byte, but the stop bit is held low instead of going back high. `frame_error` pulses instead of `rx_done`.
 
 ![uart_rx framing error waveform](docs/waveforms/uart_rx_frame_error.png)
 
-**`uart_top`** — the full loopback: a byte received on `rx` is echoed back out on `tx`.
+**The full loopback** — a byte comes in on `rx` and goes back out on `tx`.
 
 ![uart_top echo waveform](docs/waveforms/uart_top_echo.png)
 
-## Repository layout
+## Layout
 
 ```
-rtl/           SystemVerilog source (uart_rx, uart_tx, uart_top)
-constraints/   Nexys4 DDR XDC pin/clock constraints
-sim/           cocotb testbenches, shared UART bit-bang model, waveform renderer
-docs/waveforms/  Generated waveform PNGs referenced above
+rtl/             the actual UART RTL
+constraints/     Nexys4 DDR XDC file
+sim/             cocotb testbenches + waveform script
+docs/waveforms/  PNGs generated by render_waveforms.py
 ```
 
-## Status / next steps
+## What's left
 
-- [x] RTL for RX, TX, and top-level loopback
-- [x] cocotb testbenches with waveform capture
-- [ ] Build and program a bitstream on real Nexys4 DDR hardware
-- [ ] Parameterize `uart_top` for configurable baud rate (currently hardcoded to 115200)
+It works, and it's running on hardware, but there's more I want to do:
+
+- Make the baud rate on `uart_top` configurable instead of hardcoded to 115200
+- Add flow control (CTS/RTS) — the pins exist on the board but I'm not using them yet
+- Maybe wrap this in something more interesting than an echo, like a tiny command interface over the serial link
