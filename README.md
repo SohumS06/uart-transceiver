@@ -18,7 +18,7 @@ Pin constraints for the board are in [`constraints/Nexys4_DDR_chu.xdc`](constrai
 
 ## Simulation
 
-I could have just used Vivado's simulator, but I wanted to actually learn verification with [cocotb](https://www.cocotb.org/) and Icarus Verilog, since writing testbenches in Python makes for cleaner, more readable simulation than plain SystemVerilog testbenches.
+I'm using [cocotb](https://www.cocotb.org/) with Icarus Verilog for simple, Python-based simulation.
 
 The testbenches bit-bang actual UART frames onto `rx` and read them back off of `tx`, with the shared bit-timing logic living in `sim/uart_model.py`.
 
